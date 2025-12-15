@@ -8,6 +8,8 @@ import (
 	"syscall"
 
 	"VPNServer/vna"
+
+	"github.com/joho/godotenv"
 )
 
 
@@ -16,9 +18,10 @@ func main(){
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 
-
+	_ = godotenv.Load() 
 
 	sigs := make(chan os.Signal, 1)
+	
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
 
@@ -32,7 +35,7 @@ func main(){
 	}()
 		
 	////creating VNA 
-	vna,err := vna.New(rootCtx,"vpn0","10.0.0.2","255.255.255.0")
+	vna,err := vna.New(rootCtx,"vpn0","10.0.0.1","255.255.255.255",":5000")
 
 	if err != nil {
 		log.Printf("failed to create VNA:%v",err)

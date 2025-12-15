@@ -1,69 +1,91 @@
 package vna
 
 import (
-	"fmt"
+	"log"
+	"net"
 	"time"
 )
 
 func (v *VNA) RunServerListener() {
-	v.wg.Add(1)
+    v.wg.Add(1)
 
-	go func() {
+    go func() {
+        defer v.wg.Done()
 
-		defer v.wg.Done()
+        buf := make([]byte, 65535)
 
-		buf := make([]byte,65535)
-	
-		for {
+        for {
+            if v.CtxStopped() {
+                return
+            }
+            _ = v.Conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 
-			if v.CtxStopped() {
+            n, clientAddr, err := v.Conn.ReadFromUDP(buf)
+            if err != nil {
+                
+                continue
+            }
 
-				return
-			}
+            pkt := make([]byte, n)
 
-            v.Conn.SetReadDeadline(time.Now().Add(1 * time.Second)) ////wait for data max 1sec 
+            copy(pkt, buf[:n])
 
-			////Listen for packet and connection
-			n, clientAddr, err :=  v.Conn.ReadFromUDP(buf)
+            v.processIncomingPacket(pkt,clientAddr)
+       
+        }
+    }()
+}
+
+func (v *VNA) processIncomingPacket(pkt []byte, clientAddr *net.UDPAddr) {
+    v.RegisterClientPacket(clientAddr, nil)
+
+    key := clientAddr.String()
+    v.ClientsMu.RLock()
+    sess := v.ClientByAddr[key]
+    v.ClientsMu.RUnlock()
+
+    if sess == nil {
+        return
+    }
+
+    // ===== HANDSHAKE=====
+    v.ClientsMu.Lock()
+    if !sess.HandShakeDone {
+        sess.HandShakeDone = true
+        v.ClientsMu.Unlock()
+
+        if len(pkt) != 32 {
+
+            v.ClientsMu.Lock()
+            sess.HandShakeDone = false
+            v.ClientsMu.Unlock()
+            return
+        }
+
+        if err := v.Handshake(clientAddr, pkt); err != nil {
+            log.Printf("Handshake selhal s %s: %v", clientAddr, err)
+            v.ClientsMu.Lock()
+            sess.HandShakeDone = false
+            v.ClientsMu.Unlock()
+        }
+        return
+    }
+    v.ClientsMu.Unlock()
 
 
-			if err != nil {
-				continue
-			}
+    if sess.Aead == nil {
+        return
+    }
 
-			key := clientAddr.String()
+    plainPkt, err := decryptFrame(sess.Aead, pkt)
+    if err != nil {
+        log.Printf("Decrypt selhal od %s: %v", clientAddr, err)
+        return
+    }
 
-			///lock map
-			v.ClientsMu.Lock()
+    v.RegisterClientPacket(clientAddr, plainPkt)
 
-			////check if Client exists
-			sess, ok := v.Clients[key]
-
-			if !ok {
-				////create sess with client if not
-				sess = &ClientSession{Addr: clientAddr}
-				
-				v.Clients[key] = sess
-			}
-
-			///update sess last seen time
-			sess.LastSeen = time.Now()
-			v.ClientsMu.Unlock()
-
-			////save incoming address to vna object 
-
-			pkt := make([]byte,n)
-			copy(pkt,buf[:n])
-
-			//fmt.Printf("Listened packet %d",pkt)
-			_, err = v.Iface.Write(pkt)
-
-			if err != nil {
-				fmt.Println("TUN write error:", err)
-
-			}
-
-		}
-	}()
-
+    if _, err := v.Iface.Write(plainPkt); err != nil {
+        log.Println("Chyba zápisu do TUN:", err)
+    }
 }

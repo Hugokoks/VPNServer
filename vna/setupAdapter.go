@@ -3,12 +3,13 @@ package vna
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"os/exec"
 	"time"
 )
 
-// helper: parse "255.255.255.0" -> 24
+// helper: parse "255.255.255.255" -> 32
 func (v *VNA) maskPrefix() (int, error) {
     ip := net.ParseIP(v.Mask)
     if ip == nil {
@@ -55,6 +56,19 @@ func (v *VNA) SetupAdapter() error {
 
     if out, err := cmdUp.CombinedOutput(); err != nil {
         return fmt.Errorf("ip link set up failed: %v (out: %s)", err, string(out))
+    }
+
+    mtuCmd := exec.CommandContext(ctx, "ip", "link", "set", "dev", v.IfName, "mtu", "1400")
+    if out, err := mtuCmd.CombinedOutput(); err != nil {
+        log.Printf("Varování: Nepodařilo se nastavit MTU na %s: %v (výstup: %s)", v.IfName, err, string(out))
+    } else {
+        log.Printf("MTU na %s nastaveno na 1400", v.IfName)
+    }
+
+    if err := v.LoadPriveServerKey(); err != nil{
+
+
+        return fmt.Errorf("načtení server priv key: %w", err)
     }
 
     if err := v.InitConnection(); err != nil{

@@ -3,6 +3,9 @@ module VPNServer
 go 1.24.2
 
 require (
-	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	github.com/joho/godotenv v1.5.1
+	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
+	golang.org/x/crypto v0.46.0
 )
+
+require golang.org/x/sys v0.39.0 // indirect

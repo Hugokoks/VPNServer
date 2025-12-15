@@ -2,18 +2,14 @@ package vna
 
 import (
 	"context"
+	"crypto/cipher"
 	"net"
 	"sync"
-	"time"
+
+	"crypto/ed25519"
 
 	"github.com/songgao/water"
 )
-
-type ClientSession struct{
-	Addr 	*net.UDPAddr
-	LastSeen time.Time
-
-}
 
 
 type VNA struct {
@@ -32,15 +28,21 @@ type VNA struct {
 	PacketChan chan []byte
 
     Conn *net.UDPConn       
-    Clients map[string]*ClientSession
-	ClientsMu sync.RWMutex
 	
-	LocalAddr string ////where server listening
+	///Clients
+	ClientsMu sync.RWMutex
+	ClientByAddr map[string]*ClientSession 		  //Public client IP "89.24.88.10:53000" -> sess
+	ClientByVPN map[string]*ClientSession       //VPN Netowrk IP "10.0.0.10" -> sess
+
+	LocalAddr string 
+	Aead cipher.AEAD
+
+	ServerPriv ed25519.PrivateKey
 }
 
 
 
-func New(rootCtx context.Context,ifName string,ip string,mask string)(*VNA,error){
+func New(rootCtx context.Context,ifName string,ip string,mask string,portListener string)(*VNA,error){
 
 	cfg := water.Config{
 
@@ -53,8 +55,9 @@ func New(rootCtx context.Context,ifName string,ip string,mask string)(*VNA,error
 	if err != nil{
 		return nil,err
 	}
-
+	
 	ctx,cancel := context.WithCancel(rootCtx)
+
 
 	v := &VNA{
 
@@ -66,16 +69,30 @@ func New(rootCtx context.Context,ifName string,ip string,mask string)(*VNA,error
 		cancel:     cancel,
 		PacketChan: make(chan []byte, 4096),
 
-		LocalAddr: ":5000",
-		Clients:    make(map[string]*ClientSession),
-
-
+		LocalAddr: portListener,
+		ClientByAddr:    make(map[string]*ClientSession),
+		ClientByVPN: make(map[string]*ClientSession),
+		
+		
 	}
-
+	
+	
+	
 	return v,nil
 }
+//var sharedKey = []byte("12345678901234567890123456789012") 
 
 func (v * VNA)Start(){
+	
+	
+	/*
+	aead, err := newAEAD(sharedKey)
+	if err != nil {
+        
+		panic("canot init aead")
+	}
+	v.Aead = aead
+	*/
 
 	v.RunReader()
 	v.RunServerListener()
@@ -100,7 +117,6 @@ func (v * VNA)Close(){
         if v.Iface != nil {
             _ = v.Iface.Close() 
         }
-
         v.wg.Wait()
     })
 }
