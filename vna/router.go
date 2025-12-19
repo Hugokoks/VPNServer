@@ -2,6 +2,7 @@
 package vna
 
 import (
+	"VPNServer/crypted"
 	"fmt"
 	"net"
 )
@@ -38,7 +39,7 @@ func (v *VNA) forwardBroadcast(pkt []byte) {
         if sess.Addr == nil {
             continue
         }
-        if err := sendEncryptedTo(sess.Aead, v.Conn, sess.Addr, pkt); err != nil {
+        if err := crypted.SendEncryptedTo(sess.Aead, v.Conn, sess.Addr, pkt); err != nil {
             fmt.Println("broadcast send error to", sess.VPNIP, ":", err)
         }
     }
@@ -59,7 +60,7 @@ func (v *VNA) forwardUnicast(dstIP string, pkt []byte) {
 	addrCopy := *sess.Addr
 	v.ClientsMu.RUnlock()
 
-    if err := sendEncryptedTo(sess.Aead, v.Conn, &addrCopy, pkt); err != nil {
+    if err := crypted.SendEncryptedTo(sess.Aead, v.Conn, &addrCopy, pkt); err != nil {
         fmt.Println("Unicast send error:", err)
         return
     }

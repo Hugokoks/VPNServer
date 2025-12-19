@@ -72,51 +72,7 @@ func New(rootCtx context.Context,ifName string,ip string,mask string,portListene
 		LocalAddr: portListener,
 		ClientByAddr:    make(map[string]*ClientSession),
 		ClientByVPN: make(map[string]*ClientSession),
-		
-		
 	}
-	
-	
 	
 	return v,nil
-}
-//var sharedKey = []byte("12345678901234567890123456789012") 
-
-func (v * VNA)Start(){
-	
-	
-	/*
-	aead, err := newAEAD(sharedKey)
-	if err != nil {
-        
-		panic("canot init aead")
-	}
-	v.Aead = aead
-	*/
-
-	v.RunReader()
-	v.RunServerListener()
-	v.RunServerSender()         
-
-}
-
-func (v * VNA)Stop(){
-
-	v.Close()
-
-}
-
-func (v * VNA)Close(){
-   v.closeOnce.Do(func() {
-        v.cancel()
-
-        if v.Conn != nil {
-            _ = v.Conn.Close()  
-        }
-
-        if v.Iface != nil {
-            _ = v.Iface.Close() 
-        }
-        v.wg.Wait()
-    })
 }

@@ -14,52 +14,122 @@ type ClientSession struct{
 	VPNIP    string   
 
     Aead cipher.AEAD
-    HandShakeDone bool
+    HandshakeDone bool
+    HandshakeAt   time.Time
+
 }
 
-func (v *VNA) RegisterClientPacket(clientAddr *net.UDPAddr, plainPkt []byte) {
-    key := clientAddr.String()
+func (v *VNA) createClientSession(addr *net.UDPAddr) *ClientSession {
+    
+    sess := &ClientSession{
+        Addr:        addr,
+        HandshakeAt: time.Now(),
+        LastSeen:    time.Now(),
+    }
+
+    v.ClientByAddr[addr.String()] = sess
+    return sess
+}
+func (v *VNA) getClient(addr *net.UDPAddr) *ClientSession {
+    v.ClientsMu.RLock()
+    defer v.ClientsMu.RUnlock()
+    return v.ClientByAddr[addr.String()]
+}
+
+func (v *VNA) updateClientState(sess *ClientSession, plainPkt []byte) {
+	////Get Client VPN IP from packet
+    srcIP, ok := extractSrcIPv4(plainPkt)
+	
+    if !ok {
+		return
+	}
+
+	if sess.VPNIP == srcIP {
+		return
+	}
+
+	oldIP := sess.VPNIP
+	sess.VPNIP = srcIP
+    v.ClientByVPN[srcIP] = sess
+
+	v.syncClientRoute(oldIP, srcIP)
+}
+
+func extractSrcIPv4(pkt []byte) (string, bool) {
+	
+    if len(pkt) < 20 {
+		return "", false
+	}
+	
+    if (pkt[0]>>4) != 4 {
+		return "", false
+	}
+	
+    return net.IP(pkt[12:16]).String(), true
+}
+
+func (v *VNA) syncClientRoute(oldIP, newIP string) {
+	if oldIP != "" {
+		_ = exec.Command("ip", "route", "del", oldIP+"/32", "dev", v.IfName).Run()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ip", "route", "replace", newIP+"/32", "dev", v.IfName)
+	
+    if out, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("Route update failed %s: %v\n%s", newIP, err, out)
+	}
+}
+
+func (v *VNA) clientCleanupLoop() {
+    defer v.wg.Done()
+
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            v.cleanupClients()
+        case <-v.ctx.Done():
+            return
+        }
+    }
+}
+
+func (v *VNA) cleanupClients() {
+    now := time.Now()
 
     v.ClientsMu.Lock()
     defer v.ClientsMu.Unlock()
 
-    // find or create client session
-    sess, ok := v.ClientByAddr[key]
-    if !ok {
-        sess = &ClientSession{}
-        v.ClientByAddr[key] = sess
-    }
+    for key, sess := range v.ClientByAddr {
 
-    // update lastSeen and client addr
-    sess.Addr = clientAddr
-    sess.LastSeen = time.Now()
-
-    // register VPN IP 
-    if len(plainPkt) >= 20 && (plainPkt[0]>>4) == 4 {
-        srcIP := net.IP(plainPkt[12:16]).String()
-
-        // === NOVÁ ČÁST: přidej host route jen pokud se IP změnilo nebo je nový klient ===
-        if sess.VPNIP != srcIP {
-            oldIP := sess.VPNIP
-            sess.VPNIP = srcIP
-            v.ClientByVPN[srcIP] = sess
-
-            // Smaž starou route (pokud existovala)
-            if oldIP != "" {
-                cmd := exec.Command("ip", "route", "del", oldIP+"/32", "dev", v.IfName)
-                _ = cmd.Run() // klidně ignoruj chybu – route už možná neexistuje
-            }
-
-            // Přidej novou route
-            ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-            defer cancel()
-            cmd := exec.CommandContext(ctx, "ip", "route", "replace", srcIP+"/32", "dev", v.IfName)
-            if out, err := cmd.CombinedOutput(); err != nil {
-                log.Printf("CHYBA: Nepodařilo se přidat route pro klienta %s: %v\nVýstup: %s", srcIP, err, string(out))
-            } else {
-                log.Printf("Route přidána: %s/32 dev %s", srcIP, v.IfName)
-            }
+        // handshake timeout
+        if !sess.HandshakeDone && now.Sub(sess.HandshakeAt) > 5*time.Second {
+            v.removeClientLocked(key, sess)
+            continue
         }
-        // === KONEC NOVÉ ČÁSTI ===
+
+        // idle timeout
+        if now.Sub(sess.LastSeen) > 30*time.Second {
+            v.removeClientLocked(key, sess)
+            continue
+        }
     }
 }
+
+func (v *VNA) removeClientLocked(key string, sess *ClientSession) {
+    delete(v.ClientByAddr, key)
+    
+    if sess.VPNIP != "" {
+        delete(v.ClientByVPN, sess.VPNIP)
+        _ = exec.Command("ip", "route", "del", sess.VPNIP+"/32", "dev", v.IfName).Run()
+    }
+
+    log.Printf("Client removed: %s", key)
+}
+
+

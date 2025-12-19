@@ -2,9 +2,11 @@ package vna
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -78,4 +80,52 @@ func (v *VNA) SetupAdapter() error {
     }
 
     return nil
+}
+
+
+func(v *VNA) InitConnection()error{
+
+	laddr,err := net.ResolveUDPAddr("udp",v.LocalAddr)
+
+
+	if err != nil{
+
+		return err
+	}
+
+	conn,err := net.ListenUDP("udp",laddr)
+
+	if err != nil{
+
+		return  err
+
+	}
+	v.Conn = conn
+	return  nil
+
+}
+
+
+
+func (v *VNA) LoadPriveServerKey()error{
+
+
+	serverPrivB64 := os.Getenv("SERVER_PRIVATE_KEY")
+
+	if serverPrivB64 == ""{
+		return fmt.Errorf("SERVER_PRIVATE_KEY is not set")
+	}
+
+	privBytes,err := base64.StdEncoding.DecodeString(serverPrivB64)
+
+	if err != nil{
+
+		return fmt.Errorf("wrong SERVER_PRIVATE_KEY: %w", err)
+	}
+	
+
+	v.ServerPriv = privBytes
+
+	return  nil
+
 }

@@ -1,6 +1,7 @@
 package vna
 
 import (
+	"VPNServer/crypted"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -11,7 +12,6 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 )
-
 
 
 func (v *VNA) Handshake(clientAddr *net.UDPAddr, clientEphPub []byte) error {
@@ -51,7 +51,8 @@ func (v *VNA) Handshake(clientAddr *net.UDPAddr, clientEphPub []byte) error {
     fmt.Printf("Shared key: %x", sharedKey)
 
     // 7. Vytvoř AEAD
-    aead, err := newAEAD(sharedKey)
+    
+    aead, err := crypted.NewAEAD(sharedKey)
     if err != nil {
         return fmt.Errorf("vytvoření AEAD: %w", err)
     }
@@ -61,10 +62,16 @@ func (v *VNA) Handshake(clientAddr *net.UDPAddr, clientEphPub []byte) error {
     v.ClientsMu.Lock()
     if sess, ok := v.ClientByAddr[key]; ok {
         sess.Aead = aead
-        sess.HandShakeDone = true
+        sess.HandshakeDone = true
     }
     v.ClientsMu.Unlock()
 
     log.Printf("Handshake úspěšný s %s", clientAddr)
     return nil
+}
+
+
+
+func isHandshakePacket(pkt []byte) bool {
+    return len(pkt) == 32
 }
