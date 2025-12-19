@@ -88,5 +88,4 @@ func (v *VNA) processDataPacket(addr *net.UDPAddr, pkt []byte) {
         log.Println("TUN write error:", err)
     }
 
-
 }
