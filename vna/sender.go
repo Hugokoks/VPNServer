@@ -7,7 +7,7 @@ func (v *VNA) runServerSender() {
     
     for {
         select {
-        
+            
         case <-v.ctx.Done():
             return
 
