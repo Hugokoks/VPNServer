@@ -18,10 +18,11 @@ func (v *VNA) runServerListener() {
         }
         _ = v.Conn.SetReadDeadline(time.Now().Add(1 * time.Second))
         n, clientAddr, err := v.Conn.ReadFromUDP(buf)
-        if err != nil {
-            
+        
+        if err != nil {    
             continue
         }
+
         pkt := make([]byte, n)
         copy(pkt, buf[:n])
         v.processIncomingPacket(pkt,clientAddr)
@@ -31,12 +32,27 @@ func (v *VNA) runServerListener() {
 
 func (v *VNA) processIncomingPacket(pkt []byte, addr *net.UDPAddr) {
 
-    if isHandshakePacket(pkt) {
-        v.processHandshake(addr, pkt)
+     if len(pkt) < 1 {
         return
     }
 
-    v.processDataPacket(addr, pkt)
+    ////===Get type and payload fron Incoming packet===
+    ////===pkt type is based on protocol - Handshake,Data,Ip request===
+    pktType := PacketType(pkt[0])
+    payload := pkt[1:]
+
+    
+    switch pktType {
+    
+    case PacketHandshake:
+        v.processHandshake(addr, payload)
+
+    case PacketData:
+        v.processDataPacket(addr, payload)
+
+    default:
+        log.Printf("Unknown packet type %d from %s", pktType, addr)
+    }
 }
 
 
@@ -44,15 +60,18 @@ func (v *VNA) processIncomingPacket(pkt []byte, addr *net.UDPAddr) {
 func (v *VNA) processHandshake(addr *net.UDPAddr, pkt []byte) {
 
     v.ClientsMu.Lock()
-
+    
+    ///=====Remove Client Session if already exist=======
     if old, ok := v.ClientByAddr[addr.String()]; ok {
         v.removeClientLocked(addr.String(), old)
     }
 
+    ///=====Create new Client Session=======
     sess := v.createClientSession(addr)
-    
-	v.ClientsMu.Unlock()
+	
+    v.ClientsMu.Unlock()
 
+    ///======Make handshake with client=======
     if err := v.Handshake(addr, pkt); err != nil {
         log.Printf("Handshake failed %s: %v", addr, err)
         return
@@ -67,12 +86,13 @@ func (v *VNA) processHandshake(addr *net.UDPAddr, pkt []byte) {
 
 func (v *VNA) processDataPacket(addr *net.UDPAddr, pkt []byte) {
 
-    sess := v.getClient(addr)
-    
+    ///===Get Client session based on clients ip if not exist return===
+    sess := v.getClient(addr)    
 	if sess == nil || sess.Aead == nil {
         return
     }
 
+    ///===Decrypt Payload===
     plainPkt, err := crypted.DecryptFrame(sess.Aead, pkt)
     
 	if err != nil {
@@ -80,10 +100,15 @@ func (v *VNA) processDataPacket(addr *net.UDPAddr, pkt []byte) {
         return
     }
 
+    ///===UpdateClientState===
+    //check if clients VPN ip changed
+    //if does change it
+    //also change OS route to new client VPN IP
     sess.LastSeen = time.Now()
 	v.updateClientState(sess, plainPkt)
 
 
+    ///===Write data in to VNA===
     if _, err := v.Iface.Write(plainPkt); err != nil {
         log.Println("TUN write error:", err)
     }

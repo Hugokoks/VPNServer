@@ -8,13 +8,13 @@ import (
 	"net"
 )
 
-func SendEncryptedTo(aead cipher.AEAD, conn *net.UDPConn, addr *net.UDPAddr, plain []byte) error {
+func SendEncryptedTo(aead cipher.AEAD, conn *net.UDPConn, addr *net.UDPAddr, plain []byte)  error {
 	nonce := make([]byte, aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return fmt.Errorf("generování nonce selhalo: %w", err)
 	}
 
-	// Magie – nonce dst → return [nonce][ciphertext+tag]
+	//nonce dst → return [nonce][ciphertext+tag]
 	out := aead.Seal(nonce, nonce, plain, nil)
 
 	_, err := conn.WriteToUDP(out, addr)

@@ -19,6 +19,7 @@ func (v *VNA) runReader() {
     
 		//read packet's from interface
         n, err := v.Iface.Read(buf)
+        
         if err != nil {
             
             if v.CtxStopped() || strings.Contains(err.Error(), "file already closed") {

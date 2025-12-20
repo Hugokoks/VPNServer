@@ -45,7 +45,6 @@ func (v *VNA) forwardBroadcast(pkt []byte) {
     }
 }
 
-
 // forwardUnicast
 func (v *VNA) forwardUnicast(dstIP string, pkt []byte) {
     v.ClientsMu.RLock()

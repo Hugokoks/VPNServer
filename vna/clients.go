@@ -30,6 +30,7 @@ func (v *VNA) createClientSession(addr *net.UDPAddr) *ClientSession {
     v.ClientByAddr[addr.String()] = sess
     return sess
 }
+
 func (v *VNA) getClient(addr *net.UDPAddr) *ClientSession {
     v.ClientsMu.RLock()
     defer v.ClientsMu.RUnlock()
@@ -37,19 +38,23 @@ func (v *VNA) getClient(addr *net.UDPAddr) *ClientSession {
 }
 
 func (v *VNA) updateClientState(sess *ClientSession, plainPkt []byte) {
-	////Get Client VPN IP from packet
+	///===Get Client VPN IP from packet===
     srcIP, ok := extractSrcIPv4(plainPkt)
 	
     if !ok {
 		return
 	}
 
+    ///===packet src IP is same as clients VPN IP===
 	if sess.VPNIP == srcIP {
 		return
 	}
 
+    ///===save VPN old IP=== 
 	oldIP := sess.VPNIP
+    ///===Replace VPN old IP with new one===
 	sess.VPNIP = srcIP
+    ///===Create new record in ClientByVPN: make(map[string]*ClientSession) under key - VPN IP===
     v.ClientByVPN[srcIP] = sess
 
 	v.syncClientRoute(oldIP, srcIP)
@@ -69,13 +74,16 @@ func extractSrcIPv4(pkt []byte) (string, bool) {
 }
 
 func (v *VNA) syncClientRoute(oldIP, newIP string) {
-	if oldIP != "" {
+	
+    ///===If VPN old IP exist in route table delete it===
+    if oldIP != "" {
 		_ = exec.Command("ip", "route", "del", oldIP+"/32", "dev", v.IfName).Run()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
+    
+    ///===add new route with new client's VPN IP 
 	cmd := exec.CommandContext(ctx, "ip", "route", "replace", newIP+"/32", "dev", v.IfName)
 	
     if out, err := cmd.CombinedOutput(); err != nil {
@@ -122,10 +130,16 @@ func (v *VNA) cleanupClients() {
 }
 
 func (v *VNA) removeClientLocked(key string, sess *ClientSession) {
+    
+    ///===Delete client from ClientByAddr map
     delete(v.ClientByAddr, key)
     
+    
     if sess.VPNIP != "" {
+        ///===Delete client from ClientByVPN map
         delete(v.ClientByVPN, sess.VPNIP)
+        
+        ///===Delete OS route with clients VPN IP
         _ = exec.Command("ip", "route", "del", sess.VPNIP+"/32", "dev", v.IfName).Run()
     }
 
