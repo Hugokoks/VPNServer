@@ -38,6 +38,8 @@ type VNA struct {
 	Aead cipher.AEAD
 
 	ServerPriv ed25519.PrivateKey
+
+	IPPool *IPPool
 }
 
 
@@ -56,6 +58,12 @@ func New(rootCtx context.Context,ifName string,ip string,mask string,portListene
 		return nil,err
 	}
 	
+	ipPool,err := NewIPPool("10.0.0.0/24",ip)
+	
+	if err != nil {
+		return nil, err
+	}
+
 	ctx,cancel := context.WithCancel(rootCtx)
 
 
@@ -72,6 +80,7 @@ func New(rootCtx context.Context,ifName string,ip string,mask string,portListene
 		LocalAddr: portListener,
 		ClientByAddr:    make(map[string]*ClientSession),
 		ClientByVPN: make(map[string]*ClientSession),
+		IPPool:ipPool,
 	}
 	
 	return v,nil

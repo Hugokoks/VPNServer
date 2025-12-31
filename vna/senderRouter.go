@@ -8,7 +8,7 @@ import (
 )
 
 ///sending to tunel
-func (v *VNA) routeToTun(pkt []byte) {
+func (v *VNA) routeOutgoingPacket(pkt []byte) {
     
 	if len(pkt) < 20 || (pkt[0]>>4) != 4 {
         fmt.Println("drop non-IPv4 packet")

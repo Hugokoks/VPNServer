@@ -16,13 +16,14 @@ func (v * VNA)Start(){
     v.wg.Add(1)
     go v.clientCleanupLoop()
     
-    
+    v.wg.Add(1)
+    go v.ipPoolCleanupLoop()
+
 }
 
 func (v * VNA)Stop(){
 
 	v.Close()
-
 }
 
 func (v * VNA)Close(){

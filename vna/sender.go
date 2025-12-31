@@ -16,7 +16,7 @@ func (v *VNA) runServerSender() {
                 return
             }
 
-            v.routeToTun(pkt)
+            v.routeOutgoingPacket(pkt)
            
         }
     }

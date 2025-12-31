@@ -3,12 +3,15 @@ package vna
 import (
 	"context"
 	"crypto/cipher"
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net"
 	"os/exec"
 	"time"
 )
 type ClientSession struct{
+    ID       string          
 	Addr 	*net.UDPAddr
 	LastSeen time.Time
 	VPNIP    string   
@@ -18,15 +21,22 @@ type ClientSession struct{
     HandshakeAt   time.Time
 
 }
+func newSessionID() string {
+    b := make([]byte, 16)
+    rand.Read(b)
+    return hex.EncodeToString(b)
+}
 
 func (v *VNA) createClientSession(addr *net.UDPAddr) *ClientSession {
     
     sess := &ClientSession{
+        ID:          newSessionID(),
         Addr:        addr,
         HandshakeAt: time.Now(),
         LastSeen:    time.Now(),
     }
 
+    /////In Future replace addrr key for hesh key
     v.ClientByAddr[addr.String()] = sess
     return sess
 }
@@ -54,6 +64,9 @@ func (v *VNA) updateClientState(sess *ClientSession, plainPkt []byte) {
 	oldIP := sess.VPNIP
     ///===Replace VPN old IP with new one===
 	sess.VPNIP = srcIP
+    
+     //COMMIT TADY
+    v.IPPool.Commit(srcIP, sess.ID)
     ///===Create new record in ClientByVPN: make(map[string]*ClientSession) under key - VPN IP===
     v.ClientByVPN[srcIP] = sess
 
@@ -115,31 +128,30 @@ func (v *VNA) cleanupClients() {
 
     for key, sess := range v.ClientByAddr {
 
-        // handshake timeout
-        if !sess.HandshakeDone && now.Sub(sess.HandshakeAt) > 5*time.Second {
+        ///===Handshake freeze,no responding clients===
+        if !sess.HandshakeDone ||  now.Sub(sess.LastSeen) > 30*time.Second {
             v.removeClientLocked(key, sess)
             continue
         }
 
-        // idle timeout
-        if now.Sub(sess.LastSeen) > 30*time.Second {
-            v.removeClientLocked(key, sess)
-            continue
-        }
+     
     }
 }
 
 func (v *VNA) removeClientLocked(key string, sess *ClientSession) {
     
-    ///===Delete client from ClientByAddr map
+    ///===Delete client from ClientByAddr map===
     delete(v.ClientByAddr, key)
     
     
     if sess.VPNIP != "" {
-        ///===Delete client from ClientByVPN map
+        ///===Delete client from ClientByVPN map===
         delete(v.ClientByVPN, sess.VPNIP)
         
-        ///===Delete OS route with clients VPN IP
+        ////===/Release used VPNIP from IPPOOL===
+        v.IPPool.Release(sess.VPNIP)
+        
+        ///===Delete OS route with clients VPN IP===
         _ = exec.Command("ip", "route", "del", sess.VPNIP+"/32", "dev", v.IfName).Run()
     }
 
