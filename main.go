@@ -45,20 +45,19 @@ func main(){
 
 	/////Stop vna when main ends 
 	defer vna.Stop()
-
-	log.Println("virtual network adapter created")
 	
 	////add ip mask etc... to vna
-	if err := vna.SetupAdapter(); err != nil {
+	if err := vna.Boot(); err != nil {
     
-		log.Printf("failed to setup adapter: %v", err)
+		log.Printf("failed to boot vna: %v", err)
     	rootCancel()
     	return
 	
 	}
 	
-	log.Println("virtual network setup successfully")
+	log.Println("virtual network booted successfully")
 	
+	////starting server lifecycle
 	vna.Start()
 
 	log.Println("Ctrl+C for stopping")

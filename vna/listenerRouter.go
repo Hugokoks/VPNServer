@@ -16,7 +16,7 @@ func (v *VNA) routeIncomingPacket(pkt []byte, addr *net.UDPAddr) {
     ////===Get type and payload fron Incoming packet===
     ////===pkt type is based on protocol - Handshake,Data,Ip request===
     pktType := PacketType(pkt[0])
-    payload := pkt[1:]
+    pktData := pkt[1:]
 
     
     switch pktType {
@@ -24,11 +24,11 @@ func (v *VNA) routeIncomingPacket(pkt []byte, addr *net.UDPAddr) {
 	case PacketIPRequest:
 		v.processIPRequest(addr)
 
-    case PacketHandshake:
-        v.processHandshake(addr, payload)
+    case PacketHandshakeReq:
+        v.processHandshake(addr, pktData)
 
     case PacketData:
-        v.processDataPacket(addr, payload)
+        v.processDataPacket(addr, pktData)
 	
     default:
         log.Printf("Unknown packet type %d from %s", pktType, addr)
@@ -38,6 +38,7 @@ func (v *VNA) routeIncomingPacket(pkt []byte, addr *net.UDPAddr) {
 func (v *VNA) processIPRequest(addr *net.UDPAddr) {
 
     ip, err := v.IPPool.reserveIP(10 * time.Second)
+    
     if err != nil {
         log.Printf("IP allocation failed for %s: %v", addr, err)
         return
@@ -52,39 +53,46 @@ func (v *VNA) processIPRequest(addr *net.UDPAddr) {
 
 func (v *VNA) processHandshake(addr *net.UDPAddr, pkt []byte) {
 
-    v.ClientsMu.Lock()
-    
-    ///=====Remove Client Session if already exist=======
-    if old, ok := v.ClientByAddr[addr.String()]; ok {
-        v.removeClientLocked(addr.String(), old)
-    }
+	// 1. Parse & validate payload
+	hi, err := parseHandshakeInit(pkt)
+	if err != nil {
+		log.Printf("Invalid handshake from %s: %v", addr, err)
+		return
+	}
 
-    ///=====Create new Client Session=======
-    sess := v.createClientSession(addr)
-	
-    v.ClientsMu.Unlock()
+	// 2. Now and ONLY now we mutate state
+	if err := v.Handshake(addr, hi); err != nil {
+		log.Printf("Handshake failed %s: %v", addr, err)
+		return
+	}
 
-    ///======Make handshake with client=======
-    if err := v.Handshake(addr, pkt); err != nil {
-        log.Printf("Handshake failed %s: %v", addr, err)
-        return
-    }
-    sess.LastSeen = time.Now()
-
-    log.Printf("Handshake OK %s", addr)
+	log.Printf("Handshake OK %s", addr)
 }
 
 
 func (v *VNA) processDataPacket(addr *net.UDPAddr, pkt []byte) {
 
+    if len(pkt) < 32{
+        return
+    }
+    
+   
+	// ===============================
+	// 1. Parse packet
+	// ===============================
+
+	var clientID [32]byte
+	copy(clientID[:], pkt [:32])
+    encrypted := pkt[32:]
+
     ///===Get Client session based on clients ip if not exist return===
-    sess := v.getClient(addr)    
+    sess := v.getClientByID(clientID)    
 	if sess == nil || sess.Aead == nil {
         return
     }
 
     ///===Decrypt Payload===
-    plainPkt, err := crypted.DecryptFrame(sess.Aead, pkt)
+    plainPkt, err := crypted.DecryptFrame(sess.Aead, encrypted)
     
 	if err != nil {
         log.Printf("Decrypt failed from %s: %v", addr, err)

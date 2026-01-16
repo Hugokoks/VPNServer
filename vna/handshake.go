@@ -7,71 +7,118 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"log"
 	"net"
+	"time"
 
 	"golang.org/x/crypto/curve25519"
 )
 
+type HandshakeInit struct {
+	ClientIdentityPub ed25519.PublicKey
+	ClientEphPub      [32]byte
+}
+func (v *VNA) Handshake(addr *net.UDPAddr, hi *HandshakeInit) error {
 
-func (v *VNA) Handshake(clientAddr *net.UDPAddr, clientEphPub []byte) error {
-    // 1. Generuj efemerní privátní klíč serveru
-    var serverEphPriv [32]byte
-    if _, err := io.ReadFull(rand.Reader, serverEphPriv[:]); err != nil {
-        return fmt.Errorf("generování efemerního klíče: %w", err)
-    }
+	// =========================================================
+	// 1. Derive ClientID (FIXED SIZE, MAP SAFE)
+	// =========================================================
+	clientID := sha256.Sum256(hi.ClientIdentityPub) // [32]byte
 
-    // Clamping – nutný pro X25519
-    serverEphPriv[0] &= 248
-    serverEphPriv[31] &= 127
-    serverEphPriv[31] |= 64
+	// =========================================================
+	// 2. Generate server ephemeral key
+	// =========================================================
+	var serverEphPriv [32]byte
+	if _, err := io.ReadFull(rand.Reader, serverEphPriv[:]); err != nil {
+		return err
+	}
 
-    // 2. Vypočítej efemerní public klíč
-    var serverEphPub [32]byte
-    curve25519.ScalarBaseMult(&serverEphPub, &serverEphPriv)
+	serverEphPriv[0] &= 248
+	serverEphPriv[31] &= 127
+	serverEphPriv[31] |= 64
 
-    // 3. Podepiš svůj efemerní pub
-    signature := ed25519.Sign(v.ServerPriv, serverEphPub[:])
+	var serverEphPub [32]byte
+	curve25519.ScalarBaseMult(&serverEphPub, &serverEphPriv)
 
-    // 4. Pošli odpověď
-    response := append(serverEphPub[:], signature...)
-    if _, err := v.Conn.WriteToUDP(response, clientAddr); err != nil {
-        return fmt.Errorf("odeslání handshake odpovědi: %w", err)
-    }
+	// =========================================================
+	// 3. ECDH + AEAD
+	// =========================================================
+	var shared [32]byte
+	curve25519.ScalarMult(&shared, &serverEphPriv, &hi.ClientEphPub)
 
-    // 5. ECDH – spočítej shared secret
-    var clientPub [32]byte
-    copy(clientPub[:], clientEphPub)
-    var sharedSecret [32]byte
-    curve25519.ScalarMult(&sharedSecret, &serverEphPriv, &clientPub)
+	key := sha256.Sum256(shared[:])
+	aead, err := crypted.NewAEAD(key[:])
+	if err != nil {
+		return err
+	}
 
-    // 6. Odvoď klíč
-    h := sha256.Sum256(sharedSecret[:])
-    sharedKey := h[:]
-    fmt.Printf("Shared key: %x", sharedKey)
+	// =========================================================
+	// 4. SESSION CREATE / REPLACE (BY [32]byte ID)
+	// =========================================================
+	v.ClientsMu.Lock()
 
-    // 7. Vytvoř AEAD
-    
-    aead, err := crypted.NewAEAD(sharedKey)
-    if err != nil {
-        return fmt.Errorf("vytvoření AEAD: %w", err)
-    }
+	if old, ok := v.ClientByID[clientID]; ok {
+		v.removeClientLocked(old)
+	}
 
-    // 8. Ulož do session
-    key := clientAddr.String()
-    v.ClientsMu.Lock()
-    if sess, ok := v.ClientByAddr[key]; ok {
-        sess.Aead = aead
-        sess.HandshakeDone = true
-    }
-    v.ClientsMu.Unlock()
+	sess := &ClientSession{
+		ID:            clientID,
+		Addr:          addr,
+		Aead:          aead,
+		HandshakeDone: true,
+		HandshakeAt:   time.Now(),
+		LastSeen:      time.Now(),
+	}
 
-    log.Printf("Handshake úspěšný s %s", clientAddr)
-    return nil
+	v.ClientByID[clientID] = sess
+	v.ClientsMu.Unlock()
+
+	// =========================================================
+	// 5. Sign ( clientID || serverEphPub )
+	// =========================================================
+	signedData := make([]byte, 0, 64)
+	signedData = append(signedData, clientID[:]...)
+	signedData = append(signedData, serverEphPub[:]...)
+
+	sig := ed25519.Sign(v.ServerPriv, signedData)
+
+	// =========================================================
+	// 6. HandshakeRes
+	// [ clientID | serverEphPub | signature ]
+	// =========================================================
+	payload := make([]byte, 0, 32+32+64)
+	payload = append(payload, clientID[:]...)
+	payload = append(payload, serverEphPub[:]...)
+	payload = append(payload, sig...)
+
+	resp := buildPacket(PacketHandshakeRes, payload)
+	_, err = v.Conn.WriteToUDP(resp, addr)
+	return err
 }
 
+func parseHandshakeInit(pkt []byte) (*HandshakeInit, error) {
 
+	if len(pkt) != 128 {
+		return nil, fmt.Errorf("invalid handshake size")
+	}
 
-func isHandshakePacket(pkt []byte) bool {
-    return len(pkt) == 32
+	clientPub := pkt[0:32]
+	clientEph := pkt[32:64]
+	signature := pkt[64:128]
+
+	if !ed25519.Verify(
+		ed25519.PublicKey(clientPub),
+		clientEph,
+		signature,
+	) {
+		return nil, fmt.Errorf("invalid client signature")
+	}
+
+	var eph [32]byte
+	copy(eph[:], clientEph)
+
+	return &HandshakeInit{
+		ClientIdentityPub: ed25519.PublicKey(clientPub),
+		ClientEphPub:      eph,
+	}, nil
 }
+

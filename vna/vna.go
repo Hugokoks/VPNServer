@@ -31,7 +31,7 @@ type VNA struct {
 	
 	///Clients
 	ClientsMu sync.RWMutex
-	ClientByAddr map[string]*ClientSession 		  //Public client IP "89.24.88.10:53000" -> sess
+	ClientByID map[[32]byte]*ClientSession 		  //Public client IP "89.24.88.10:53000" -> sess
 	ClientByVPN map[string]*ClientSession       //VPN Netowrk IP "10.0.0.10" -> sess
 
 	LocalAddr string 
@@ -78,7 +78,7 @@ func New(rootCtx context.Context,ifName string,ip string,mask string,portListene
 		PacketChan: make(chan []byte, 4096),
 
 		LocalAddr: portListener,
-		ClientByAddr:    make(map[string]*ClientSession),
+		ClientByID:    make(map[[32]byte]*ClientSession),
 		ClientByVPN: make(map[string]*ClientSession),
 		IPPool:ipPool,
 	}

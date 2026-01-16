@@ -129,11 +129,14 @@ func (v *VNA) sendIPResponse(addr *net.UDPAddr, ip net.IP, mask net.IP) {
     [7] = MASK oktet 3
     [8] = MASK oktet 4
     */
-    pkt := make([]byte, 1+4+4)
-    pkt[0] = byte(PacketIPResponse)
+ 
 
-    copy(pkt[1:5], ip.To4())
-    copy(pkt[5:9], mask.To4())
+    payload := make([]byte, 8)
+    
+    copy(payload[0:4], ip.To4())
+    copy(payload[4:8], mask.To4())
+
+    pkt := buildPacket(PacketIPResponse,payload)
 
     if _, err := v.Conn.WriteToUDP(pkt, addr); err != nil {
         log.Printf("Failed to send IP response to %s: %v", addr, err)

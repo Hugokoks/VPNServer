@@ -2,11 +2,9 @@ package vna
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"os/exec"
 	"time"
 )
@@ -42,7 +40,7 @@ func (v *VNA) SetupAdapter() error {
     ctx, cancel := context.WithTimeout(v.ctx, 5*time.Second)
     defer cancel()
 
-    // ip addr add 10.0.0.2/24 dev vpn0
+    // ip addr add 10.0.0.1/24 dev vpn0
     cmdAddr := exec.CommandContext(ctx,
         "ip", "addr", "add", cidr, "dev", v.IfName,
     )
@@ -67,65 +65,5 @@ func (v *VNA) SetupAdapter() error {
         log.Printf("MTU na %s nastaveno na 1400", v.IfName)
     }
 
-    if err := v.LoadPriveServerKey(); err != nil{
-
-
-        return fmt.Errorf("načtení server priv key: %w", err)
-    }
-
-    if err := v.InitConnection(); err != nil{
-
-        return fmt.Errorf("Failed to Create Listener %v",err)
-
-    }
-
     return nil
-}
-
-
-func(v *VNA) InitConnection()error{
-
-	laddr,err := net.ResolveUDPAddr("udp",v.LocalAddr)
-
-
-	if err != nil{
-
-		return err
-	}
-
-	conn,err := net.ListenUDP("udp",laddr)
-
-	if err != nil{
-
-		return  err
-
-	}
-	v.Conn = conn
-	return  nil
-
-}
-
-
-
-func (v *VNA) LoadPriveServerKey()error{
-
-
-	serverPrivB64 := os.Getenv("SERVER_PRIVATE_KEY")
-
-	if serverPrivB64 == ""{
-		return fmt.Errorf("SERVER_PRIVATE_KEY is not set")
-	}
-
-	privBytes,err := base64.StdEncoding.DecodeString(serverPrivB64)
-
-	if err != nil{
-
-		return fmt.Errorf("wrong SERVER_PRIVATE_KEY: %w", err)
-	}
-	
-
-	v.ServerPriv = privBytes
-
-	return  nil
-
 }

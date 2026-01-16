@@ -11,7 +11,7 @@ import (
 	"time"
 )
 type ClientSession struct{
-    ID       string          
+    ID [32]byte
 	Addr 	*net.UDPAddr
 	LastSeen time.Time
 	VPNIP    string   
@@ -27,26 +27,27 @@ func newSessionID() string {
     return hex.EncodeToString(b)
 }
 
-func (v *VNA) createClientSession(addr *net.UDPAddr) *ClientSession {
-    
-    sess := &ClientSession{
-        ID:          newSessionID(),
-        Addr:        addr,
-        HandshakeAt: time.Now(),
-        LastSeen:    time.Now(),
-    }
+func (v *VNA) createClientSession(id [32]byte, addr *net.UDPAddr, aead cipher.AEAD) *ClientSession {
 
-    /////In Future replace addrr key for hesh key
-    v.ClientByAddr[addr.String()] = sess
-    return sess
+	sess := &ClientSession{
+		ID:            id,
+		Addr:          addr,
+		Aead:          aead,
+		HandshakeDone: true,
+		HandshakeAt:   time.Now(),
+		LastSeen:      time.Now(),
+	}
+
+	v.ClientByID[id] = sess
+	return sess
 }
 
-func (v *VNA) getClient(addr *net.UDPAddr) *ClientSession {
-    v.ClientsMu.RLock()
-    defer v.ClientsMu.RUnlock()
-    return v.ClientByAddr[addr.String()]
-}
 
+func (v *VNA) getClientByID(id [32]byte) *ClientSession {
+	v.ClientsMu.RLock()
+	defer v.ClientsMu.RUnlock()
+	return v.ClientByID[id]
+}
 func (v *VNA) updateClientState(sess *ClientSession, plainPkt []byte) {
 	///===Get Client VPN IP from packet===
     srcIP, ok := extractSrcIPv4(plainPkt)
@@ -65,8 +66,12 @@ func (v *VNA) updateClientState(sess *ClientSession, plainPkt []byte) {
     ///===Replace VPN old IP with new one===
 	sess.VPNIP = srcIP
     
-     //COMMIT TADY
-    v.IPPool.Commit(srcIP, sess.ID)
+     //COMMIT
+    owner := hex.EncodeToString(sess.ID[:])
+    
+    ///Free Reserved IP and save used IP into IP pool
+    v.IPPool.Commit(srcIP, owner)
+
     ///===Create new record in ClientByVPN: make(map[string]*ClientSession) under key - VPN IP===
     v.ClientByVPN[srcIP] = sess
 
@@ -126,11 +131,11 @@ func (v *VNA) cleanupClients() {
     v.ClientsMu.Lock()
     defer v.ClientsMu.Unlock()
 
-    for key, sess := range v.ClientByAddr {
+    for _, sess := range v.ClientByID {
 
         ///===Handshake freeze,no responding clients===
         if !sess.HandshakeDone ||  now.Sub(sess.LastSeen) > 30*time.Second {
-            v.removeClientLocked(key, sess)
+            v.removeClientLocked(sess)
             continue
         }
 
@@ -138,10 +143,10 @@ func (v *VNA) cleanupClients() {
     }
 }
 
-func (v *VNA) removeClientLocked(key string, sess *ClientSession) {
+func (v *VNA) removeClientLocked(sess *ClientSession) {
     
     ///===Delete client from ClientByAddr map===
-    delete(v.ClientByAddr, key)
+    delete(v.ClientByID,sess.ID)
     
     
     if sess.VPNIP != "" {
@@ -155,7 +160,7 @@ func (v *VNA) removeClientLocked(key string, sess *ClientSession) {
         _ = exec.Command("ip", "route", "del", sess.VPNIP+"/32", "dev", v.IfName).Run()
     }
 
-    log.Printf("Client removed: %s", key)
+    log.Printf("Client removed: %s", sess.ID)
 }
 
 
