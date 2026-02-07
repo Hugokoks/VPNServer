@@ -1,27 +1,23 @@
 # VPNServer
 
-VPNServer is a custom VPN server implementation written in Go.  
-It is designed as a low-level networking project to explore secure tunneling,
-UDP-based communication, and protocol design.
+VPNServer is a custom VPN server written in Go, designed to run on Linux systems.
+It manages client authentication, encrypted communication, virtual IP allocation,
+and packet forwarding for connected VPN clients.
 
-The server handles client registration, encrypted session establishment,
-and packet routing between connected clients.  
-It is intended primarily for Linux environments.
-
-This project focuses on understanding how VPN-like systems work internally,
-rather than providing a production-ready VPN solution.
+This project focuses on low-level networking, UDP-based tunneling, and
+secure communication without relying on third-party VPN frameworks.
 
 ---
 
 ## Key Features
 
 - Custom VPN server written in Go
-- UDP-based data transport
-- Encrypted handshake inspired by TLS mechanisms (without certificate authority)
-- Client registration and authentication
-- Dynamic IP address allocation managed by the server
-- Secure packet forwarding between VPN clients
-- Linux-focused networking (TUN/TAP)
+- Linux-based deployment
+- UDP-based encrypted tunnel
+- Client registration and secure handshake
+- Dynamic virtual IP address allocation
+- Encrypted packet routing between clients and the network
+- Server-side traffic forwarding using NAT
 
 ---
 
@@ -29,23 +25,54 @@ rather than providing a production-ready VPN solution.
 
 The VPNServer is responsible for:
 
-- Accepting incoming client connections
-- Performing encrypted handshakes
-- Assigning virtual IP addresses to clients
-- Managing active VPN sessions
-- Routing encrypted packets between connected clients
-- Interfacing with the system network stack using TUN devices
-
-The protocol design and encryption logic are intentionally kept explicit
-to support learning, experimentation, and extensibility.
+- Accepting incoming VPN client connections
+- Performing encrypted handshakes (TLS-inspired, no CA)
+- Registering clients and assigning virtual IP addresses
+- Receiving encrypted packets from clients
+- Decrypting and forwarding packets to the target network
+- Encrypting and routing response traffic back to clients
 
 ---
 
-## Usage
+## System Requirements
 
-> ⚠️ Requires Linux and access to TUN/TAP devices.
+- Linux operating system
+- Root privileges (required for networking and routing)
+- Go installed (Go 1.20+ recommended)
+- Enabled IP forwarding
+- NAT (MASQUERADE) configured
 
-Basic example:
+---
+
+## Network Configuration (Required)
+
+Before running the VPN server, the Linux system must be properly configured
+to forward traffic from VPN clients to the external network.
+
+### 1. Enable IP Forwarding
+
+Temporarily enable IP forwarding:
 
 ```bash
-go run main.go
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+Make the change persistent by editing /etc/sysctl.conf
+
+Apply the configuration:
+```bash
+sudo sysctl -p
+```
+
+```bash
+net.ipv4.ip_forward=1
+```
+
+### 2. Configure NAT (MASQUERADE)
+
+```bash
+sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+sudo iptables -A FORWARD -i eth0 -j ACCEPT
+sudo iptables -A FORWARD -o eth0 -j ACCEPT
+```
+
+
